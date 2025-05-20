@@ -9,7 +9,7 @@ import numpy as np
 import statsmodels.api as sm
 from datetime import datetime, timedelta
 import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend for plotting
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller
 import logging
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Google Drive setup
 SCOPES = ['https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_KEY = os.environ.get('GOOGLE_SERVICE_ACCOUNT_KEY')  # From GitHub Secrets
+SERVICE_ACCOUNT_KEY = os.environ.get('GOOGLE_SERVICE_ACCOUNT_KEY')
 with open('/tmp/service-account.json', 'w') as f:
     f.write(SERVICE_ACCOUNT_KEY)
 credentials = service_account.Credentials.from_service_account_file(
@@ -36,8 +36,8 @@ drive_service = build('drive', 'v3', credentials=credentials)
 headers = {
     "Accept": "application/json",
     "Content-Type": "application/json",
-    "access-token": os.environ.get('DHAN_ACCESS_TOKEN'),  # From GitHub Secrets
-    "client-id": os.environ.get('DHAN_CLIENT_ID')  # From GitHub Secrets
+    "access-token": os.environ.get('DHAN_ACCESS_TOKEN'),
+    "client-id": os.environ.get('DHAN_CLIENT_ID')
 }
 
 # Define stock pairs
@@ -58,12 +58,24 @@ stock_pairs = [
     },
 ]
 
-# Function to upload to Google Drive
+# Function to upload to Google Drive (updated to overwrite existing files)
 def upload_to_drive(filename, filepath, folder_id):
-    file_metadata = {'name': filename, 'parents': [folder_id]}
+    # Search for existing file with the same name in the folder
+    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+    response = drive_service.files().list(q=query, fields='files(id, name)').execute()
+    files = response.get('files', [])
+
     media = MediaFileUpload(filepath, mimetype='application/octet-stream')
-    file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-    logger.info(f"Uploaded {filename} to Google Drive with ID: {file.get('id')}")
+    if files:
+        # File exists, update it
+        file_id = files[0]['id']
+        file = drive_service.files().update(fileId=file_id, media_body=media).execute()
+        logger.info(f"Updated existing file {filename} in Google Drive with ID: {file.get('id')}")
+    else:
+        # File doesn't exist, create new
+        file_metadata = {'name': filename, 'parents': [folder_id]}
+        file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        logger.info(f"Created new file {filename} in Google Drive with ID: {file.get('id')}")
 
 def fetch_ohlc(security_id, stock_name, column_name, exchange_segment="NSE_EQ", instrument_type="EQUITY", days=150):
     url = "https://api.dhan.co/v2/charts/historical"
@@ -98,8 +110,8 @@ def fetch_ohlc(security_id, stock_name, column_name, exchange_segment="NSE_EQ", 
         return None
 
 def send_email(csv_filepath):
-    sender_email = os.environ.get('SENDER_EMAIL')  # From GitHub Secrets
-    receiver_email = os.environ.get('RECEIVER_EMAIL')  # From GitHub Secrets
+    sender_email = os.environ.get('SENDER_EMAIL')
+    receiver_email = os.environ.get('RECEIVER_EMAIL')
     subject = "Pair Trading Signals CSV"
     body = "Please find attached the latest pair trading signals."
 
@@ -117,7 +129,7 @@ def send_email(csv_filepath):
         part.add_header("Content-Disposition", f"attachment; filename= {filename}")
         message.attach(part)
 
-    app_password = os.environ.get('EMAIL_APP_PASSWORD')  # From GitHub Secrets
+    app_password = os.environ.get('EMAIL_APP_PASSWORD')
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
@@ -131,7 +143,7 @@ def send_email(csv_filepath):
 def main():
     save_dir = "/tmp/test_results"
     os.makedirs(save_dir, exist_ok=True)
-    folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')  # From GitHub Secrets
+    folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
 
     all_signals = []
     for pair in stock_pairs:
@@ -223,7 +235,7 @@ def main():
         plt.savefig(plot_path)
         plt.close()
         upload_to_drive(f"spread_{stock1['name']}_{stock2['name']}.png", plot_path, folder_id)
-        logger.info(f"Savedwür: plot to {plot_path} and uploaded to Google Drive")
+        logger.info(f"Saved plot to {plot_path} and uploaded to Google Drive")
 
     if all_signals:
         signals_df = pd.concat(all_signals, ignore_index=True)
