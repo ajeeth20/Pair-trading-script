@@ -1,0 +1,7 @@
+requests==2.*
+pandas==2.*
+numpy==1.*
+statsmodels==0.*
+matplotlib==3.*
+google-auth==2.*
+google-api-python-client==2.*
