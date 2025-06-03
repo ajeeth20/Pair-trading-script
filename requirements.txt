@@ -5,3 +5,5 @@ statsmodels==0.*
 matplotlib==3.*
 google-auth==2.*
 google-api-python-client==2.*
+- name: Install dependencies
+  run: pip install -r requirements.txt
