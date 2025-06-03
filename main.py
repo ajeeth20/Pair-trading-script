@@ -33,8 +33,8 @@ credentials = service_account.Credentials.from_service_account_file(
 drive_service = build('drive', 'v3', credentials=credentials)
 
 # Zerodha Kite setup
-kite = KiteConnect(api_key=os.environ.get('ZERODHA_API_KEY'))
-kite.set_access_token(os.environ.get('ZERODHA_ACCESS_TOKEN'))
+kite = KiteConnect(api_key=os.environ.get('KITE_API_KEY'))
+kite.set_access_token(os.environ.get('KITE_ACCESS_TOKEN'))
 
 # Define stock pairs with Zerodha instrument tokens
 stock_pairs = [
@@ -1072,7 +1072,7 @@ def upload_to_drive(filename, filepath, folder_id):
         logger.info(f"Created new file {filename} in Google Drive with ID: {file.get('id')}")
 
 # Function to fetch OHLC data from Zerodha Kite API
-def fetch_ohlc(instrument_token, stock_name, column_name, exchange="NSE", interval="day", days=150):
+def fetch_ohlc(instrument_token, stock_name, column_name, exchange="NSE", interval="day", days=365):
     try:
         to_date = datetime.now().date()
         from_date = to_date - timedelta(days=days)
