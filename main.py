@@ -1080,39 +1080,38 @@ def upload_to_drive(filename, filepath, folder_id):
         logger.info(f"Created new file {filename} in Google Drive with ID: {file.get('id')}")
 
 from kiteconnect import KiteConnect
+import pickle
 
-kite = KiteConnect(api_key=os.environ.get("KITE_API_KEY"))
-kite.set_access_token(os.environ.get("KITE_ACCESS_TOKEN"))
+def fetch_ohlc(instrument_token, stock_name, column_name, interval="day", days=150):
+    # Load access token from file
+    with open("/tmp/access_token.pkl", "rb") as f:
+        access_token = pickle.load(f)
 
-def fetch_ohlc(security_id, stock_name, column_name, exchange_segment="NSE_EQ", instrument_type="EQUITY", days=365):
+    kite = KiteConnect(api_key=os.environ.get("KITE_API_KEY"))
+    kite.set_access_token(access_token)
+
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=days)
+
     try:
-        from_date = datetime.now().date() - timedelta(days=days)
-        to_date = datetime.now().date()
-
-        # Format symbol like NSE:MRF
-        symbol = f"NSE:{stock_name.upper()}"
-
-        logger.info(f"Fetching historical data for {symbol} from Zerodha Kite")
-        data = kite.historical_data(
-            instrument_token=kite.ltp([symbol])[symbol]['instrument_token'],
-            from_date=from_date,
-            to_date=to_date,
-            interval="day"
-        )
-
-        df = pd.DataFrame(data)
-        if df.empty:
-            logger.warning(f"No data returned for {stock_name}")
+        data = kite.historical_data(instrument_token, from_date, to_date, interval)
+        if not data:
+            logger.warning(f"No data returned for {stock_name} (instrument_token: {instrument_token})")
             return None
 
-        df["Date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-        df = df[["Date", "close"]].rename(columns={"close": column_name})
+        df = pd.DataFrame(data)
+        df["date"] = pd.to_datetime(df["date"])
+        df.rename(columns={"close": column_name}, inplace=True)
+        df = df[["date", column_name]]
+        df.rename(columns={"date": "Date"}, inplace=True)
+
         logger.info(f"Fetched {len(df)} rows for {stock_name} from {df['Date'].min()} to {df['Date'].max()}")
         return df
 
     except Exception as e:
-        logger.error(f"Error fetching data for {stock_name}: {e}")
+        logger.error(f"Error fetching data for {stock_name} (instrument_token: {instrument_token}): {e}")
         return None
+
 
 
 def send_email(csv_filepath):
