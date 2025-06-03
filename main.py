@@ -18,6 +18,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
+from kiteconnect import KiteConnect
+import pickle
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -32,13 +34,6 @@ credentials = service_account.Credentials.from_service_account_file(
     '/tmp/service-account.json', scopes=SCOPES)
 drive_service = build('drive', 'v3', credentials=credentials)
 
-# API credentials for Dhan
-headers = {
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-    "access-token": os.environ.get('DHAN_ACCESS_TOKEN'),
-    "client-id": os.environ.get('DHAN_CLIENT_ID')
-}
 
 # Define stock pairs
 stock_pairs = [
@@ -1079,8 +1074,7 @@ def upload_to_drive(filename, filepath, folder_id):
         file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         logger.info(f"Created new file {filename} in Google Drive with ID: {file.get('id')}")
 
-from kiteconnect import KiteConnect
-import pickle
+
 
 def fetch_ohlc(instrument_token, stock_name, column_name, interval="day", days=150):
     # Load access token from file
