@@ -2,8 +2,8 @@
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from kiteconnect import KiteConnect
 import os
-import requests
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
@@ -18,8 +18,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
-from kiteconnect import KiteConnect
-import pickle
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -34,10 +32,13 @@ credentials = service_account.Credentials.from_service_account_file(
     '/tmp/service-account.json', scopes=SCOPES)
 drive_service = build('drive', 'v3', credentials=credentials)
 
+# Zerodha Kite setup
+kite = KiteConnect(api_key=os.environ.get('ZERODHA_API_KEY'))
+kite.set_access_token(os.environ.get('ZERODHA_ACCESS_TOKEN'))
 
-# Define stock pairs
+# Define stock pairs with Zerodha instrument tokens
 stock_pairs = [
-     {'stock1': {'instrument_token': '589569', 'name': 'HAL', 'column': 'HAL_Close', 'sector': 'Aerospace & Defense'}, 'stock2': {'instrument_token': '98049', 'name': 'BEL', 'column': 'BEL_Close', 'sector': 'Aerospace & Defense'}},
+  {'stock1': {'instrument_token': '589569', 'name': 'HAL', 'column': 'HAL_Close', 'sector': 'Aerospace & Defense'}, 'stock2': {'instrument_token': '98049', 'name': 'BEL', 'column': 'BEL_Close', 'sector': 'Aerospace & Defense'}},
     {'stock1': {'instrument_token': '6191105', 'name': 'PIIND', 'column': 'PIIND_Close', 'sector': 'Agrochemicals'}, 'stock2': {'instrument_token': '2889473', 'name': 'UPL', 'column': 'UPL_Close', 'sector': 'Agrochemicals'}},
     {'stock1': {'instrument_token': '1076225', 'name': 'MOTHERSON', 'column': 'MOTHERSON_Close', 'sector': 'Auto Ancillaries'}, 'stock2': {'instrument_token': '558337', 'name': 'BOSCHLTD', 'column': 'BOSCHLTD_Close', 'sector': 'Auto Ancillaries'}},
     {'stock1': {'instrument_token': '1076225', 'name': 'MOTHERSON', 'column': 'MOTHERSON_Close', 'sector': 'Auto Ancillaries'}, 'stock2': {'instrument_token': '79873', 'name': 'TIINDIA', 'column': 'TIINDIA_Close', 'sector': 'Auto Ancillaries'}},
@@ -1055,71 +1056,58 @@ stock_pairs = [
     {'stock1': {'instrument_token': '85761', 'name': 'BALKRISIND', 'column': 'BALKRISIND_Close', 'sector': 'Tyres / Auto Ancillaries'}, 'stock2': {'instrument_token': '41729', 'name': 'APOLLOTYRE', 'column': 'APOLLOTYRE_Close', 'sector': 'Tyres / Auto Ancillaries'}},
 ]
 
-# Function to upload to Google Drive (updated to overwrite existing files)
+# Function to upload to Google Drive (overwrites existing files)
 def upload_to_drive(filename, filepath, folder_id):
-    # Search for existing file with the same name in the folder
     query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
     response = drive_service.files().list(q=query, fields='files(id, name)').execute()
     files = response.get('files', [])
-
     media = MediaFileUpload(filepath, mimetype='application/octet-stream')
     if files:
-        # File exists, update it
         file_id = files[0]['id']
         file = drive_service.files().update(fileId=file_id, media_body=media).execute()
         logger.info(f"Updated existing file {filename} in Google Drive with ID: {file.get('id')}")
     else:
-        # File doesn't exist, create new
         file_metadata = {'name': filename, 'parents': [folder_id]}
         file = drive_service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         logger.info(f"Created new file {filename} in Google Drive with ID: {file.get('id')}")
 
-
-
-def fetch_ohlc(instrument_token, stock_name, column_name, interval="day", days=150):
-    # Load access token from file
-    with open("/tmp/access_token.pkl", "rb") as f:
-        access_token = pickle.load(f)
-
-    kite = KiteConnect(api_key=os.environ.get("KITE_API_KEY"))
-    kite.set_access_token(access_token)
-
-    to_date = datetime.now()
-    from_date = to_date - timedelta(days=days)
-
+# Function to fetch OHLC data from Zerodha Kite API
+def fetch_ohlc(instrument_token, stock_name, column_name, exchange="NSE", interval="day", days=150):
     try:
-        data = kite.historical_data(instrument_token, from_date, to_date, interval)
+        to_date = datetime.now().date()
+        from_date = to_date - timedelta(days=days)
+        # Fetch historical data
+        data = kite.historical_data(
+            instrument_token=instrument_token,
+            from_date=from_date.strftime('%Y-%m-%d'),
+            to_date=to_date.strftime('%Y-%m-%d'),
+            interval=interval,
+            continuous=False,
+            oi=False
+        )
         if not data:
             logger.warning(f"No data returned for {stock_name} (instrument_token: {instrument_token})")
             return None
-
+        # Convert to DataFrame
         df = pd.DataFrame(data)
-        df["date"] = pd.to_datetime(df["date"])
-        df.rename(columns={"close": column_name}, inplace=True)
-        df = df[["date", column_name]]
-        df.rename(columns={"date": "Date"}, inplace=True)
-
+        df = df[['date', 'close']].rename(columns={'date': 'Date', 'close': column_name})
+        df['Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
         logger.info(f"Fetched {len(df)} rows for {stock_name} from {df['Date'].min()} to {df['Date'].max()}")
         return df
-
     except Exception as e:
         logger.error(f"Error fetching data for {stock_name} (instrument_token: {instrument_token}): {e}")
         return None
-
-
 
 def send_email(csv_filepath):
     sender_email = os.environ.get('SENDER_EMAIL')
     receiver_email = os.environ.get('RECEIVER_EMAIL')
     subject = "Pair Trading Signals CSV"
     body = "Please find attached the latest pair trading signals."
-
     message = MIMEMultipart()
     message["From"] = sender_email
     message["To"] = receiver_email
     message["Subject"] = subject
     message.attach(MIMEText(body, "plain"))
-
     filename = os.path.basename(csv_filepath)
     with open(csv_filepath, "rb") as file:
         part = MIMEBase("application", "octet-stream")
@@ -1127,7 +1115,6 @@ def send_email(csv_filepath):
         encoders.encode_base64(part)
         part.add_header("Content-Disposition", f"attachment; filename= {filename}")
         message.attach(part)
-
     app_password = os.environ.get('EMAIL_APP_PASSWORD')
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
@@ -1143,63 +1130,50 @@ def main():
     save_dir = "/tmp/test_results"
     os.makedirs(save_dir, exist_ok=True)
     folder_id = os.environ.get('GOOGLE_DRIVE_FOLDER_ID')
-
     all_signals = []
     for pair in stock_pairs:
         stock1 = pair["stock1"]
         stock2 = pair["stock2"]
         sector = stock1["sector"]
         logger.info(f"Processing pair: {stock1['name']} - {stock2['name']} ({sector})")
-
         stock_data = {
-            stock1["name"]: fetch_ohlc(stock1["security_id"], stock1["name"], stock1["column"]),
-            stock2["name"]: fetch_ohlc(stock2["security_id"], stock2["name"], stock2["column"])
+            stock1["name"]: fetch_ohlc(stock1["instrument_token"], stock1["name"], stock1["column"]),
+            stock2["name"]: fetch_ohlc(stock2["instrument_token"], stock2["name"], stock2["column"])
         }
-
         if any(data is None for data in stock_data.values()):
             logger.warning(f"Skipping pair {stock1['name']} - {stock2['name']} due to missing data")
             continue
-
         df = stock_data[stock1["name"]].set_index("Date")[[stock1["column"]]].join(
             stock_data[stock2["name"]].set_index("Date")[[stock2["column"]]], how="inner"
         )
         df.index = pd.to_datetime(df.index)
         df = df.dropna()
-
         if df.empty:
             logger.warning(f"Empty DataFrame for {stock1['name']} - {stock2['name']}")
             continue
-
         logger.info(df.tail(20).to_string())
-
         X = sm.add_constant(df[stock1["column"]])
         model = sm.OLS(df[stock2["column"]], X).fit()
         logger.info(model.summary().as_text())
-
         df["predicted"] = model.predict(X)
         df["residuals"] = df[stock2["column"]] - df["predicted"]
-
         SSE = np.sum(df["residuals"]**2)
         n, k = len(df), X.shape[1]
         standard_error = np.sqrt(SSE / (n - k))
         logger.info(f"Standard Error: {standard_error}")
-
         adf_result = adfuller(df["residuals"].dropna())
         adf_p_value = adf_result[1]
         logger.info(f"ADF Statistic: {adf_result[0]}, p-value: {adf_p_value}")
-
         df["deviation_from_std_error"] = df["residuals"] / standard_error
         df["signal"] = None
         df.loc[df["deviation_from_std_error"] < -1.5, "signal"] = f"BUY {stock2['name']}, SELL {stock1['name']}"
         df.loc[df["deviation_from_std_error"] > 1.5, "signal"] = f"SELL {stock2['name']}, BUY {stock1['name']}"
-
         plot_df = df[["deviation_from_std_error", "signal"]].copy()
         plot_df["date"] = plot_df.index
         csv_path = f"{save_dir}/data_{stock1['name']}_{stock2['name']}.csv"
         plot_df.to_csv(csv_path, index=False)
         upload_to_drive(f"data_{stock1['name']}_{stock2['name']}.csv", csv_path, folder_id)
         logger.info(f"Saved CSV to {csv_path} and uploaded to Google Drive")
-
         signal_df = df[df["signal"].notnull()][["deviation_from_std_error", "signal"]].copy()
         signal_df["stock1_name"] = stock1["name"]
         signal_df["stock2_name"] = stock2["name"]
@@ -1208,7 +1182,6 @@ def main():
         signal_df["adf_p_value"] = adf_p_value
         all_signals.append(signal_df.reset_index(drop=True))
         logger.info(signal_df.tail(10).to_string())
-
         plt.figure(figsize=(14, 6))
         plt.plot(df.index, df["deviation_from_std_error"], label="Deviation from Std Error", color="blue")
         plt.axhline(1.5, color="red", linestyle="--", label="+1.5 Std Error")
@@ -1235,7 +1208,6 @@ def main():
         plt.close()
         upload_to_drive(f"spread_{stock1['name']}_{stock2['name']}.png", plot_path, folder_id)
         logger.info(f"Saved plot to {plot_path} and uploaded to Google Drive")
-
     if all_signals:
         signals_df = pd.concat(all_signals, ignore_index=True)
         signals_csv_path = f"{save_dir}/pair_trading_signals.csv"
