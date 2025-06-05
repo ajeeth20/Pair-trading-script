@@ -1072,7 +1072,7 @@ def upload_to_drive(filename, filepath, folder_id):
         logger.info(f"Created new file {filename} in Google Drive with ID: {file.get('id')}")
 
 # Function to fetch OHLC data from Zerodha Kite API
-def fetch_ohlc(instrument_token, stock_name, column_name, exchange="NSE", interval="day", days=365):
+def fetch_ohlc(instrument_token, stock_name, column_name, exchange="NSE", interval="day", days=367):
     try:
         to_date = datetime.now().date()
         from_date = to_date - timedelta(days=days)
